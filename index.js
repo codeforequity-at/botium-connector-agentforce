@@ -1,36 +1,33 @@
-const debug = require('debug')('botium-connector-agentforce-dev')
-const axios = require('axios')
-const _ = require('lodash')
+const debug = require('debug')('botium-connector-agentforce')
+const fetch = require('node-fetch')
+const crypto = require('crypto')
 
 const Capabilities = {
   AGENTFORCE_INSTANCE_URL: 'AGENTFORCE_INSTANCE_URL',
   AGENTFORCE_CLIENT_ID: 'AGENTFORCE_CLIENT_ID',
   AGENTFORCE_CLIENT_SECRET: 'AGENTFORCE_CLIENT_SECRET',
-  AGENTFORCE_USERNAME: 'AGENTFORCE_USERNAME',
-  AGENTFORCE_PASSWORD: 'AGENTFORCE_PASSWORD',
-  AGENTFORCE_SECURITY_TOKEN: 'AGENTFORCE_SECURITY_TOKEN',
   AGENTFORCE_AGENT_ID: 'AGENTFORCE_AGENT_ID',
-  AGENTFORCE_API_VERSION: 'AGENTFORCE_API_VERSION',
-  AGENTFORCE_TIMEOUT: 'AGENTFORCE_TIMEOUT',
-  AGENTFORCE_SIMULATION_MODE: 'AGENTFORCE_SIMULATION_MODE' // New capability for dev edition
+  AGENTFORCE_API_VERSION: 'AGENTFORCE_API_VERSION'
 }
 
-class AgentForceDevEditionConnector {
+class AgentForceConnector {
   constructor ({ queueBotSays, caps }) {
     this.queueBotSays = queueBotSays
     this.caps = caps
     this.accessToken = null
     this.sessionId = null
-    this.axiosInstance = null
-    this.simulationMode = true // Always true for dev edition
+    this.sequenceId = 1
+    this.timeout = 60000
   }
 
   Validate () {
-    debug('Validate called (Developer Edition Mode)')
+    debug('Validating configuration')
     
-    // Required capabilities
     const requiredCaps = [
-      Capabilities.AGENTFORCE_INSTANCE_URL
+      Capabilities.AGENTFORCE_INSTANCE_URL,
+      Capabilities.AGENTFORCE_CLIENT_ID,
+      Capabilities.AGENTFORCE_CLIENT_SECRET,
+      Capabilities.AGENTFORCE_AGENT_ID
     ]
     
     for (const cap of requiredCaps) {
@@ -39,411 +36,392 @@ class AgentForceDevEditionConnector {
       }
     }
 
-    // Check authentication method - either client credentials or username/password
-    const hasClientCredentials = this.caps[Capabilities.AGENTFORCE_CLIENT_ID] && this.caps[Capabilities.AGENTFORCE_CLIENT_SECRET]
-    const hasUserCredentials = this.caps[Capabilities.AGENTFORCE_USERNAME] && this.caps[Capabilities.AGENTFORCE_PASSWORD]
-    
-    if (!hasClientCredentials && !hasUserCredentials) {
-      throw new Error('Either Client ID/Secret or Username/Password authentication is required')
-    }
-
     return Promise.resolve()
   }
 
   async Build () {
-    debug('Build called (Developer Edition Mode)')
+    debug('Building connector')
     
-    // Set default values
-    this.apiVersion = this.caps[Capabilities.AGENTFORCE_API_VERSION] || 'v60.0'
-    this.timeout = parseInt(this.caps[Capabilities.AGENTFORCE_TIMEOUT]) || 60000
-    this.agentId = this.caps[Capabilities.AGENTFORCE_AGENT_ID] || 'dev-edition-agent'
+    this.apiVersion = this.caps[Capabilities.AGENTFORCE_API_VERSION] || 'v61.0'
+    this.agentId = this.caps[Capabilities.AGENTFORCE_AGENT_ID]
+    this.sfApiHost = this.caps[Capabilities.AGENTFORCE_INSTANCE_URL]
+    this.sfOrgDomain = this.caps[Capabilities.AGENTFORCE_INSTANCE_URL]
     
-    // Configure axios instance
-    this.axiosInstance = axios.create({
-      timeout: this.timeout,
-      headers: {
-        'Content-Type': 'application/json'
-      }
+    debug('Configuration complete', {
+      apiVersion: this.apiVersion,
+      agentId: this.agentId,
+      sfApiHost: this.sfApiHost
     })
   }
 
   async Start () {
-    debug('Start called (Developer Edition Mode)')
+    debug('Starting connector')
     
     try {
-      // Step 1: Authenticate and get access token
       await this._authenticate()
-      
-      // Step 2: Initialize simulation session
-      await this._initializeSimulation()
-      
-      debug(`Simulation session started successfully with ID: ${this.sessionId}`)
+      await this._startSession()
+      debug('Connector started successfully')
     } catch (error) {
-      debug('Error during Start:', error.message)
-      throw new Error(`Failed to start AgentForce simulation session: ${error.message}`)
+      debug('Failed to start connector:', error.message)
+      throw new Error(`Failed to start AgentForce connection: ${error.message}`)
     }
   }
 
   async UserSays (msg) {
-    debug('UserSays called with message:', JSON.stringify(msg))
+    debug('Processing user message:', msg.messageText)
     
+    if (!this.accessToken) {
+      throw new Error('No access token available')
+    }
+
     if (!this.sessionId) {
-      throw new Error('No active session. Please start a session first.')
+      throw new Error('No session available')
     }
 
     try {
-      // In simulation mode, we'll create intelligent responses
-      const response = await this._simulateAgentResponse(msg)
+      const response = await this._sendMessageToAgent(msg)
+      debug('Agent response received')
       
-      // Process the response and queue bot messages
-      if (response) {
-        const botMsg = this._parseSimulatedResponse(response, msg)
-        if (botMsg) {
-          this.queueBotSays(botMsg)
+      if (response && response.outputs) {
+        for (const output of response.outputs) {
+          const botMsg = this._parseAgentResponse(output, msg)
+          if (botMsg) {
+            this.queueBotSays(botMsg)
+          }
         }
       }
       
     } catch (error) {
-      debug('Error in UserSays:', error.message)
+      debug('Error processing message:', error.message)
       throw new Error(`Failed to process message: ${error.message}`)
     }
   }
 
   async Stop () {
-    debug('Stop called (Developer Edition Mode)')
+    debug('Stopping connector')
     
-    if (this.sessionId) {
-      try {
-        await this._endSimulation()
-        debug('Simulation session ended successfully')
-      } catch (error) {
-        debug('Error ending session:', error.message)
-        // Don't throw error on cleanup
+    try {
+      if (this.sessionId) {
+        await this._endSession()
       }
+    } catch (error) {
+      debug('Error ending session:', error.message)
     }
     
-    this.sessionId = null
     this.accessToken = null
+    this.sessionId = null
   }
 
   async Clean () {
-    debug('Clean called (Developer Edition Mode)')
+    debug('Cleaning up connector')
     await this.Stop()
   }
 
-  // Private methods for Developer Edition simulation
   async _authenticate() {
-    debug('Authenticating with Salesforce (Developer Edition)...')
+    debug('Authenticating with Salesforce')
     
-    const authUrl = `${this.caps[Capabilities.AGENTFORCE_INSTANCE_URL]}/services/oauth2/token`
+    const authUrl = `${this.sfOrgDomain}/services/oauth2/token`
     
-    let authData
-    
-    // Check which authentication method to use
-    if (this.caps[Capabilities.AGENTFORCE_CLIENT_ID] && this.caps[Capabilities.AGENTFORCE_CLIENT_SECRET]) {
-      // Client Credentials Flow
-      authData = {
-        grant_type: 'client_credentials',
-        client_id: this.caps[Capabilities.AGENTFORCE_CLIENT_ID],
-        client_secret: this.caps[Capabilities.AGENTFORCE_CLIENT_SECRET]
-      }
-    } else {
-      // Username/Password Flow
-      const password = this.caps[Capabilities.AGENTFORCE_SECURITY_TOKEN] 
-        ? this.caps[Capabilities.AGENTFORCE_PASSWORD] + this.caps[Capabilities.AGENTFORCE_SECURITY_TOKEN]
-        : this.caps[Capabilities.AGENTFORCE_PASSWORD]
-        
-      authData = {
-        grant_type: 'password',
-        client_id: this.caps[Capabilities.AGENTFORCE_CLIENT_ID] || 'default_client_id',
-        client_secret: this.caps[Capabilities.AGENTFORCE_CLIENT_SECRET] || 'default_client_secret',
-        username: this.caps[Capabilities.AGENTFORCE_USERNAME],
-        password: password
-      }
+    const authData = {
+      grant_type: 'client_credentials',
+      client_id: this.caps[Capabilities.AGENTFORCE_CLIENT_ID],
+      client_secret: this.caps[Capabilities.AGENTFORCE_CLIENT_SECRET]
     }
     
     try {
-      const response = await this.axiosInstance.post(authUrl, new URLSearchParams(authData), {
+      const response = await this._httpRequest(authUrl, {
+        method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded'
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json'
+        },
+        body: new URLSearchParams(authData)
+      })
+      
+      if (!response.data.access_token) {
+        throw new Error('No access token received from Salesforce')
+      }
+      
+      this.accessToken = response.data.access_token
+      debug('Authentication successful')
+      
+    } catch (error) {
+      const errorMsg = error.response?.data?.error_description || 
+                      error.response?.data?.error || 
+                      error.message
+      debug('Authentication failed:', errorMsg)
+      throw new Error(`Salesforce authentication failed: ${errorMsg}`)
+    }
+  }
+
+  async _startSession() {
+    debug('Starting Agentforce session')
+    
+    const sessionUrl = `${this.sfApiHost}/einstein/ai-agent/v1/agents/${this.agentId}/sessions`
+    
+    const sessionData = {
+      externalSessionKey: crypto.randomUUID(),
+      instanceConfig: {
+        endpoint: this.sfOrgDomain
+      },
+      streamingCapabilities: {
+        chunkTypes: ["Text"]
+      },
+      bypassUser: true
+    }
+    
+    try {
+      const response = await this._httpRequest(sessionUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(sessionData)
+      })
+      
+      if (response.data.sessionId) {
+        this.sessionId = response.data.sessionId
+      } else if (response.data.id) {
+        this.sessionId = response.data.id
+      } else {
+        throw new Error('No session ID received from Agent API')
+      }
+      
+      debug('Session started successfully:', this.sessionId)
+      
+    } catch (error) {
+      const errorMsg = error.response?.data?.error?.message || 
+                      error.response?.data?.message || 
+                      error.message
+      debug('Session creation failed:', errorMsg)
+      throw new Error(`Failed to start Agent session: ${errorMsg}`)
+    }
+  }
+
+  async _sendMessageToAgent(msg) {
+    debug('Sending message to agent')
+    
+    const messageUrl = `${this.sfApiHost}/einstein/ai-agent/v1/sessions/${this.sessionId}/messages`
+    
+    const messageData = {
+      message: msg.messageText || msg.text || '',
+      sequenceId: this.sequenceId
+    }
+    
+    this.sequenceId++
+    
+    try {
+      const response = await this._httpRequest(messageUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(messageData)
+      })
+      
+      debug('Message sent successfully')
+      return response.data
+      
+    } catch (error) {
+      const errorMsg = error.response?.data?.error?.message || 
+                      error.response?.data?.message || 
+                      error.message
+      debug('Message sending failed:', errorMsg)
+      throw new Error(`Failed to send message to agent: ${errorMsg}`)
+    }
+  }
+
+  async _endSession() {
+    debug('Ending Agentforce session')
+    
+    if (!this.sessionId) {
+      return
+    }
+    
+    const endUrl = `${this.sfApiHost}/einstein/ai-agent/v1/sessions/${this.sessionId}`
+    
+    try {
+      await this._httpRequest(endUrl, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${this.accessToken}`,
+          'Accept': 'application/json'
         }
       })
       
-      this.accessToken = response.data.access_token
-      debug('Authentication successful (Developer Edition)')
-      
-      // Update axios instance with access token
-      this.axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${this.accessToken}`
+      debug('Session ended successfully')
       
     } catch (error) {
-      debug('Authentication failed:', error.response?.data || error.message)
-      throw new Error(`Authentication failed: ${error.response?.data?.error_description || error.message}`)
+      debug('Error ending session:', error.message)
     }
   }
 
-  async _initializeSimulation() {
-    debug('Initializing simulation session...')
-    
-    // Generate a session ID
-    this.sessionId = this._generateSessionId()
-    
-    // Optionally, create a custom object record to track the session
-    try {
-      await this._createSessionRecord()
-    } catch (error) {
-      debug('Could not create session record (this is normal for dev edition):', error.message)
-      // Continue anyway - session tracking is optional
-    }
-    
-    debug(`Simulation session initialized with ID: ${this.sessionId}`)
-  }
-
-  async _createSessionRecord() {
-    // Try to create a session record in a custom object (if it exists)
-    const sessionData = {
-      Name: `Botium Session ${this.sessionId}`,
-      Session_ID__c: this.sessionId,
-      Agent_ID__c: this.agentId,
-      Status__c: 'Active',
-      Start_Time__c: new Date().toISOString()
+  _parseAgentResponse(output, originalMsg) {
+    if (!output) {
+      return null
     }
 
-    try {
-      const response = await this.axiosInstance.post(
-        `${this.caps[Capabilities.AGENTFORCE_INSTANCE_URL]}/services/data/${this.apiVersion}/sobjects/Botium_Session__c`,
-        sessionData
-      )
-      debug('Session record created:', response.data.id)
-    } catch (error) {
-      // Custom object might not exist - that's fine for simulation
-      debug('Session record creation skipped (custom object not found)')
-    }
-  }
-
-  async _simulateAgentResponse(msg) {
-    debug('Simulating agent response for:', msg.messageText)
-    
-    // Create intelligent responses based on the input
-    const userMessage = (msg.messageText || '').toLowerCase()
-    
-    // Simulate different types of responses
-    let response = {
-      text: '',
-      type: 'text',
-      confidence: 0.9,
-      intent: 'general_inquiry',
-      entities: []
-    }
-
-    // Simple rule-based responses for simulation
-    if (userMessage.includes('hello') || userMessage.includes('hi')) {
-      response.text = "Hello! I'm your Agentforce assistant. How can I help you today?"
-      response.intent = 'greeting'
-    } else if (userMessage.includes('help')) {
-      response.text = "I'm here to help! I can assist you with various tasks. What do you need help with?"
-      response.intent = 'help_request'
-    } else if (userMessage.includes('weather')) {
-      response.text = "I'd be happy to help with weather information, but I don't have access to real-time weather data in this simulation."
-      response.intent = 'weather_inquiry'
-    } else if (userMessage.includes('product') || userMessage.includes('service')) {
-      response = {
-        text: "Here are our available products and services:",
-        type: 'card',
-        cards: [
-          {
-            title: "Product A",
-            subtitle: "Our flagship product",
-            image: "https://example.com/product-a.jpg",
-            buttons: [
-              { text: "Learn More", payload: "learn_more_product_a" },
-              { text: "Buy Now", payload: "buy_product_a" }
-            ]
-          },
-          {
-            title: "Service B", 
-            subtitle: "Professional services",
-            buttons: [
-              { text: "Get Quote", payload: "quote_service_b" }
-            ]
-          }
-        ],
-        intent: 'product_inquiry'
-      }
-    } else if (userMessage.includes('thank')) {
-      response.text = "You're welcome! Is there anything else I can help you with?"
-      response.intent = 'gratitude'
-    } else {
-      response.text = `I understand you're asking about "${msg.messageText}". While I'm running in simulation mode (Developer Edition), I can help you test various conversation flows. Try asking about products, weather, or say hello!`
-      response.intent = 'general_inquiry'
-    }
-
-    // Add some simulated processing delay
-    await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000))
-    
-    return response
-  }
-
-  _parseSimulatedResponse(response, originalMsg) {
     const botMsg = { 
       sender: 'bot', 
-      sourceData: response,
-      messageText: response.text
+      sourceData: output
     }
 
-    // Handle different response types
-    if (response.type === 'card' && response.cards) {
-      botMsg.cards = response.cards.map(card => ({
-        text: card.title,
-        subtext: card.subtitle,
-        image: card.image ? { mediaUri: card.image } : undefined,
-        buttons: (card.buttons || []).map(button => ({
-          text: button.text,
-          payload: button.payload
-        }))
-      }))
+    if (output.type === 'text' && output.text) {
+      botMsg.messageText = output.text
+    } else if (output.type === 'richContent' && output.richContent) {
+      botMsg.messageText = output.richContent.text || 'Rich content response'
+      
+      if (output.richContent.elements) {
+        botMsg.cards = this._parseRichContentElements(output.richContent.elements)
+      }
+    } else if (output.text) {
+      botMsg.messageText = output.text
+    } else {
+      botMsg.messageText = 'Agent response received'
     }
 
-    // Add NLP information
-    if (response.intent) {
+    if (output.intent) {
       botMsg.nlp = {
         intent: {
-          name: response.intent,
-          confidence: response.confidence || 0.9,
-          incomprehension: response.intent === 'unknown'
-        },
-        entities: response.entities || []
+          name: output.intent.name || 'unknown',
+          confidence: output.intent.confidence || 0.9,
+          incomprehension: output.intent.name === 'unknown'
+        }
+      }
+      
+      if (output.entities && Array.isArray(output.entities)) {
+        botMsg.nlp.entities = output.entities
       }
     }
 
     return botMsg
   }
 
-  async _endSimulation() {
-    debug('Ending simulation session...')
-    
-    // Optionally update the session record
-    try {
-      await this._updateSessionRecord('Completed')
-    } catch (error) {
-      debug('Could not update session record:', error.message)
+  _parseRichContentElements(elements) {
+    if (!Array.isArray(elements)) {
+      return []
     }
-  }
 
-  async _updateSessionRecord(status) {
-    // Try to update the session record if it exists
-    try {
-      const updateData = {
-        Status__c: status,
-        End_Time__c: new Date().toISOString()
+    return elements.map(element => {
+      const card = {
+        text: element.title || 'Card',
+        subtext: element.subtitle || element.description || ''
       }
-
-      // We'd need the record ID to update, so this is just a placeholder
-      debug('Session record update skipped (simulation mode)')
-    } catch (error) {
-      debug('Session record update failed:', error.message)
-    }
+      
+      if (element.imageUrl) {
+        card.image = { mediaUri: element.imageUrl }
+      }
+      
+      if (element.buttons && Array.isArray(element.buttons)) {
+        card.buttons = element.buttons.map(button => ({
+          text: button.label || button.text || 'Button',
+          payload: button.value || button.payload || button.text || 'button_click'
+        }))
+      }
+      
+      return card
+    })
   }
 
-  _generateSessionId() {
-    return `dev-session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  async _httpRequest(url, options = {}) {
+    const defaultHeaders = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Botium-Agentforce-Connector/1.0'
+    }
+
+    const fetchOptions = {
+      method: options.method || 'GET',
+      headers: { ...defaultHeaders, ...options.headers },
+      timeout: this.timeout,
+      ...options
+    }
+
+    if (options.body) {
+      fetchOptions.body = options.body
+    }
+
+    const response = await fetch(url, fetchOptions)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      let errorData
+      try {
+        errorData = JSON.parse(errorText)
+      } catch (e) {
+        errorData = { error: errorText }
+      }
+      
+      const error = new Error(`HTTP ${response.status}: ${response.statusText}`)
+      error.response = {
+        status: response.status,
+        statusText: response.statusText,
+        data: errorData
+      }
+      throw error
+    }
+
+    const contentType = response.headers.get('content-type')
+    if (contentType && contentType.includes('application/json')) {
+      return {
+        data: await response.json(),
+        status: response.status,
+        statusText: response.statusText
+      }
+    } else {
+      return {
+        data: await response.text(),
+        status: response.status,
+        statusText: response.statusText
+      }
+    }
   }
 }
 
 module.exports = {
   PluginVersion: 1,
-  PluginClass: AgentForceDevEditionConnector,
+  PluginClass: AgentForceConnector,
   PluginDesc: {
-    name: 'Salesforce Agentforce (Developer Edition)',
+    name: 'Salesforce Agentforce Connector',
     provider: 'Salesforce',
-    avatar: null,
-    helperText: 'Connect to Salesforce for Agentforce simulation in Developer Edition. This connector simulates Agentforce responses since the full Agentforce features are not available in Developer Edition.',
     capabilities: [
       {
         name: Capabilities.AGENTFORCE_INSTANCE_URL,
         label: 'Salesforce Instance URL',
-        description: 'The base URL of your Salesforce Developer Edition org',
-        type: 'url',
+        type: 'string',
         required: true,
-        sampleHeader: 'Salesforce Instance URL',
-        sampleDescription: 'Enter your Salesforce Developer Edition org URL',
-        sampleBody: 'https://your-domain.develop.my.salesforce.com'
+        description: 'Salesforce organization URL (e.g., https://myorg.my.salesforce.com)'
       },
       {
         name: Capabilities.AGENTFORCE_CLIENT_ID,
-        label: 'Client ID (Consumer Key)',
-        description: 'The Consumer Key from your connected app',
+        label: 'Client ID',
         type: 'string',
-        required: false,
-        sampleHeader: 'Connected App Client ID',
-        sampleDescription: 'The Consumer Key from your connected app configuration'
+        required: true,
+        description: 'Connected App Consumer Key from Salesforce'
       },
       {
         name: Capabilities.AGENTFORCE_CLIENT_SECRET,
-        label: 'Client Secret (Consumer Secret)',
-        description: 'The Consumer Secret from your connected app',
+        label: 'Client Secret',
         type: 'secret',
-        required: false,
-        sampleHeader: 'Connected App Client Secret',
-        sampleDescription: 'The Consumer Secret from your connected app configuration'
-      },
-      {
-        name: Capabilities.AGENTFORCE_USERNAME,
-        label: 'Username',
-        description: 'Salesforce username (for username/password flow)',
-        type: 'string',
-        required: false,
-        sampleHeader: 'Salesforce Username',
-        sampleDescription: 'Username for your Developer Edition org'
-      },
-      {
-        name: Capabilities.AGENTFORCE_PASSWORD,
-        label: 'Password',
-        description: 'Password for the user',
-        type: 'secret',
-        required: false,
-        sampleHeader: 'Salesforce Password',
-        sampleDescription: 'Password for your Developer Edition org'
-      },
-      {
-        name: Capabilities.AGENTFORCE_SECURITY_TOKEN,
-        label: 'Security Token',
-        description: 'Security token (optional, used if IP not whitelisted)',
-        type: 'secret',
-        required: false,
-        sampleHeader: 'Security Token',
-        sampleDescription: 'Salesforce security token for the user'
+        required: true,
+        description: 'Connected App Consumer Secret from Salesforce'
       },
       {
         name: Capabilities.AGENTFORCE_AGENT_ID,
-        label: 'Agent ID (Simulation)',
-        description: 'Agent identifier for simulation purposes',
+        label: 'Agent ID',
         type: 'string',
-        required: false,
-        sampleHeader: 'Agent ID',
-        sampleDescription: 'Any identifier for your simulated agent'
+        required: true,
+        description: 'Salesforce Agentforce Agent ID (18-character ID starting with 0Xx)'
       },
       {
         name: Capabilities.AGENTFORCE_API_VERSION,
         label: 'API Version',
-        description: 'Salesforce API version (default: v60.0)',
-        type: 'choice',
+        type: 'string',
         required: false,
-        choices: [
-          { key: 'v60.0', name: 'v60.0 (Winter \'24)', description: 'Winter \'24 Release' },
-          { key: 'v59.0', name: 'v59.0 (Summer \'23)', description: 'Summer \'23 Release' },
-          { key: 'v58.0', name: 'v58.0 (Spring \'23)', description: 'Spring \'23 Release' }
-        ],
-        sampleHeader: 'API Version',
-        sampleDescription: 'Select the Salesforce API version to use'
-      },
-      {
-        name: Capabilities.AGENTFORCE_TIMEOUT,
-        label: 'Request Timeout (ms)',
-        description: 'Timeout for API requests in milliseconds (default: 60000)',
-        type: 'int',
-        required: false,
-        sampleHeader: 'Request Timeout',
-        sampleDescription: 'Maximum time to wait for API responses'
+        description: 'Salesforce API Version (default: v61.0)'
       }
     ],
     features: {
@@ -460,8 +438,7 @@ module.exports = {
       audioInput: false,
       sendAttachments: false,
       supportedFileExtensions: [],
-      mediaDownload: false,
-      helloText: 'Hello, I am your Agentforce assistant (Developer Edition Simulation)'
+      mediaDownload: false
     }
   }
 }
