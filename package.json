@@ -2,13 +2,11 @@
   "name": "botium-connector-agentforce",
   "version": "1.0.0",
   "description": "Botium connector for Salesforce Agentforce",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
-    "build": "echo \"Placeholder\"",
-    "lint": "eslint index.js",
-    "lint:fix": "eslint --fix index.js",
-    "test": "echo \"No tests specified\"",
-    "publish:premium-dist": "npm run lint && npm pack && cross-env rm -f $PUBLISH_DIR/packages/botium-connector-agentforce*.tgz && cross-env mkdir -p $PUBLISH_DIR/packages && cross-env mv botium-connector-agentforce*.tgz $PUBLISH_DIR/packages"
+    "lint": "eslint src/**/*.js",
+    "lint:fix": "eslint --fix src/**/*.js",
+    "test": "node prove-authentication.js"
   },
   "keywords": [
     "botium",
@@ -16,33 +14,33 @@
     "salesforce",
     "agentforce",
     "chatbot",
-    "testing",
-    "ai"
+    "testing"
   ],
   "author": "Botium Team",
   "license": "MIT",
   "dependencies": {
-    "debug": "^4.3.4",
-    "lodash": "^4.17.21",
-    "node-fetch": "^2.7.0",
-    "jsonwebtoken": "^9.0.0"
-  },
-  "peerDependencies": {
-    "botium-core": ">=2.0.0"
+    "debug": "^4.3.4"
   },
   "devDependencies": {
-    "@types/jest": "^29.5.14",
-    "botium-core": "https://github.com/codeforequity-at/botium-core.git#develop",
-    "cross-env": "^7.0.3",
     "eslint": "^8.56.0",
-    "eslint-config-standard": "^17.1.0"
-    
-   
-  },
-  "optionalDependencies": {
-    "dotenv": "^16.6.1"
+    "eslint-config-standard": "^17.1.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-promise": "^6.1.1"
   },
   "engines": {
-    "node": ">=14.0.0"
-  }
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "package.json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/codeforequity-at/botium-connectors"
+  },
+  "bugs": {
+    "url": "https://github.com/codeforequity-at/botium-connectors/issues"
+  },
+  "homepage": "https://github.com/codeforequity-at/botium-connectors#readme"
 }
