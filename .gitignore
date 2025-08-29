@@ -1,5 +1,11 @@
-node_modules
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+
+# Environment variables
 .env
-.package-lock.json
-*.pem
-connector-config.json
+.env.local
+.env.test
+
