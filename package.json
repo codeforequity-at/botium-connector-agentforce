@@ -4,6 +4,7 @@
   "description": "Botium connector for Salesforce Agentforce",
   "main": "src/index.js",
   "scripts": {
+    "build": "npm run lint",
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint --fix src/**/*.js",
     "test": "node prove-authentication.js"
