@@ -43,13 +43,14 @@ class AgentForceConnector {
 
     this.apiVersion = this.caps[Capabilities.AGENTFORCE_API_VERSION] || 'v61.0'
     this.agentId = this.caps[Capabilities.AGENTFORCE_AGENT_ID]
-    this.sfApiHost = this.caps[Capabilities.AGENTFORCE_INSTANCE_URL]
+    this.sfApiHost = 'https://api.salesforce.com'
     this.sfOrgDomain = this.caps[Capabilities.AGENTFORCE_INSTANCE_URL]
 
     debug('Configuration complete', {
       apiVersion: this.apiVersion,
       agentId: this.agentId,
-      sfApiHost: this.sfApiHost
+      sfApiHost: this.sfApiHost,
+      sfOrgDomain: this.sfOrgDomain
     })
   }
 
@@ -79,16 +80,17 @@ class AgentForceConnector {
 
     try {
       const response = await this._sendMessageToAgent(msg)
-      debug('Agent response received')
+      debug('Agent response received', JSON.stringify(response))
 
-      if (response && response.outputs) {
-        for (const output of response.outputs) {
-          const botMsg = this._parseAgentResponse(output, msg)
+      if (response && response.messages) {
+        for (const message of response.messages) {
+          const botMsg = this._parseAgentResponse(message, msg)
           if (botMsg) {
             this.queueBotSays(botMsg)
           }
         }
       }
+
     } catch (error) {
       debug('Error processing message:', error.message)
       throw new Error(`Failed to process message: ${error.message}`)
@@ -202,8 +204,12 @@ class AgentForceConnector {
     const messageUrl = `${this.sfApiHost}/einstein/ai-agent/v1/sessions/${this.sessionId}/messages`
 
     const messageData = {
-      message: msg.messageText || msg.text || '',
-      sequenceId: this.sequenceId
+      message: {
+        sequenceId: this.sequenceId.toString(),
+        type: 'Text',
+        text: msg.messageText || msg.text || ''
+      },
+      variables: []
     }
 
     this.sequenceId++
@@ -254,71 +260,33 @@ class AgentForceConnector {
     }
   }
 
-  _parseAgentResponse (output, _originalMsg) {
-    if (!output) {
+  _parseAgentResponse (message, _originalMsg) {
+    if (!message) {
       return null
     }
 
     const botMsg = {
       sender: 'bot',
-      sourceData: output
+      sourceData: message
     }
 
-    if (output.type === 'text' && output.text) {
-      botMsg.messageText = output.text
-    } else if (output.type === 'richContent' && output.richContent) {
-      botMsg.messageText = output.richContent.text || 'Rich content response'
-
-      if (output.richContent.elements) {
-        botMsg.cards = this._parseRichContentElements(output.richContent.elements)
-      }
-    } else if (output.text) {
-      botMsg.messageText = output.text
+    if (message.type === 'Inform' && message.message) {
+      botMsg.messageText = message.message
+    } else if (message.text) {
+      botMsg.messageText = message.text
     } else {
       botMsg.messageText = 'Agent response received'
     }
 
-    if (output.intent) {
-      botMsg.nlp = {
-        intent: {
-          name: output.intent.name || 'unknown',
-          confidence: output.intent.confidence || 0.9,
-          incomprehension: output.intent.name === 'unknown'
-        }
-      }
+    if (message.feedbackId) {
+      botMsg.feedbackId = message.feedbackId
+    }
 
-      if (output.entities && Array.isArray(output.entities)) {
-        botMsg.nlp.entities = output.entities
-      }
+    if (message.id) {
+      botMsg.messageId = message.id
     }
 
     return botMsg
-  }
-
-  _parseRichContentElements (elements) {
-    if (!Array.isArray(elements)) {
-      return []
-    }
-
-    return elements.map(element => {
-      const card = {
-        text: element.title || 'Card',
-        subtext: element.subtitle || element.description || ''
-      }
-
-      if (element.imageUrl) {
-        card.image = { mediaUri: element.imageUrl }
-      }
-
-      if (element.buttons && Array.isArray(element.buttons)) {
-        card.buttons = element.buttons.map(button => ({
-          text: button.label || button.text || 'Button',
-          payload: button.value || button.payload || button.text || 'button_click'
-        }))
-      }
-
-      return card
-    })
   }
 
   async _httpRequest (url, options = {}) {
@@ -380,7 +348,6 @@ module.exports = {
   PluginDesc: {
     name: 'Salesforce Agentforce Connector',
     provider: 'Salesforce',
-    avatar: null,
     capabilities: [
       {
         name: Capabilities.AGENTFORCE_INSTANCE_URL,
@@ -418,21 +385,5 @@ module.exports = {
         description: 'Salesforce API Version (default: v61.0)'
       }
     ],
-    features: {
-      conversationFlowTesting: true,
-      e2eTesting: true,
-      intentResolution: true,
-      intentConfidenceScore: true,
-      alternateIntents: false,
-      entityResolution: true,
-      entityConfidenceScore: true,
-      testCaseGeneration: true,
-      testCaseExport: false,
-      securityTesting: false,
-      audioInput: false,
-      sendAttachments: false,
-      supportedFileExtensions: [],
-      mediaDownload: false
-    }
   }
 }
