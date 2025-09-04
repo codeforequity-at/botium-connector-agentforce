@@ -5,7 +5,9 @@ const config = {
   AGENTFORCE_INSTANCE_URL: 'your_instance_url', // https://orgfarm-d52f78d6ac-dev-ed.develop.my.salesforce.com
   AGENTFORCE_CLIENT_ID: 'Your_Client_ID',
   AGENTFORCE_CLIENT_SECRET: 'Your_Client_Secret',
-  AGENTFORCE_AGENT_ID: '0050X0000000000'
+  AGENTFORCE_AGENT_ID: '0050X0000000000',
+  SALESFORCE_API_HOST: 'https://api.salesforce.com'
+
 }
 
 async function testAuthentication() {
@@ -13,9 +15,9 @@ async function testAuthentication() {
   console.log('================================\n')
 
   try {
-    // Test authentication
+    // Step 1: Test authentication using org domain
     console.log('Step 1: Testing authentication...')
-    console.log('URL:', `${config.AGENTFORCE_INSTANCE_URL}/services/oauth2/token`)
+    console.log('Auth URL:', `${config.AGENTFORCE_INSTANCE_URL}/services/oauth2/token`)
     
     const authData = {
       grant_type: 'client_credentials',
@@ -31,7 +33,7 @@ async function testAuthentication() {
       },
       body: new URLSearchParams(authData)
     })
-    
+
     if (!authResponse.ok) {
       const errorText = await authResponse.text()
       console.log('Authentication failed')
@@ -47,11 +49,10 @@ async function testAuthentication() {
     console.log('Token type:', authResult.token_type)
     console.log('Token length:', authResult.access_token ? authResult.access_token.length : 'N/A')
     console.log('Instance URL:', authResult.instance_url)
-    console.log('Issued at:', authResult.issued_at)
     
-    // Test session creation with the token using official API endpoint
+    // Step 2: Test session creation using api.salesforce.com
     console.log('\nStep 2: Testing session creation...')
-    console.log('URL:', `https://api.salesforce.com/einstein/ai-agent/v1/agents/${config.AGENTFORCE_AGENT_ID}/sessions`)
+    console.log('Session URL:', `${config.SALESFORCE_API_HOST}/einstein/ai-agent/v1/agents/${config.AGENTFORCE_AGENT_ID}/sessions`)
     
     const sessionData = {
       externalSessionKey: crypto.randomUUID(),
@@ -64,9 +65,9 @@ async function testAuthentication() {
       bypassUser: true
     }
     
-    console.log('Request body:', JSON.stringify(sessionData, null, 2))
+    console.log('Session data:', JSON.stringify(sessionData, null, 2))
     
-    const sessionResponse = await fetch(`https://api.salesforce.com/einstein/ai-agent/v1/agents/${config.AGENTFORCE_AGENT_ID}/sessions`, {
+    const sessionResponse = await fetch(`${config.SALESFORCE_API_HOST}/einstein/ai-agent/v1/agents/${config.AGENTFORCE_AGENT_ID}/sessions`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${authResult.access_token}`,
