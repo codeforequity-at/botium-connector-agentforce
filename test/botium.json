@@ -1,0 +1,15 @@
+{
+  "botium": {
+    "Capabilities": {
+      "CONTAINERMODE": "agentforce",
+      "AGENTFORCE_INSTANCE_URL": "your_instance_url",
+      "AGENTFORCE_CLIENT_ID": "your_client_id",
+      "AGENTFORCE_CLIENT_SECRET": "your_client_secret",
+      "AGENTFORCE_AGENT_ID": "your-agent-id",
+      "AGENTFORCE_AUTH_MODE": "client_credentials",
+      "AGENTFORCE_API_VERSION": "v61.0",
+      "AGENTFORCE_TIMEOUT": 60000,
+      "AGENTFORCE_SIMULATION_MODE": false
+    }
+  }
+}
