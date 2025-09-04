@@ -90,7 +90,6 @@ class AgentForceConnector {
           }
         }
       }
-
     } catch (error) {
       debug('Error processing message:', error.message)
       throw new Error(`Failed to process message: ${error.message}`)
@@ -384,6 +383,6 @@ module.exports = {
         required: false,
         description: 'Salesforce API Version (default: v61.0)'
       }
-    ],
+    ]
   }
 }
