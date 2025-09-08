@@ -86,7 +86,7 @@ class AgentForceConnector {
         for (const message of response.messages) {
           const botMsg = this._parseAgentResponse(message, msg)
           if (botMsg) {
-            this.queueBotSays(botMsg)
+            setTimeout(() => this.queueBotSays(botMsg), 0)
           }
         }
       }

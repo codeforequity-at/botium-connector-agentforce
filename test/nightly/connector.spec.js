@@ -1,6 +1,6 @@
 require('dotenv').config()
 const assert = require('chai').assert
-const Connector = require('../src/index')
+const Connector = require('../../src/index')
 const { readCaps } = require('./helper')
 
 describe('Agentforce Connector', function () {
