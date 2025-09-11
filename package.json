@@ -4,10 +4,12 @@
   "description": "Botium connector for Salesforce Agentforce",
   "main": "src/index.js",
   "scripts": {
-    "build": "npm run lint",
+    "build": "npm run lint && rollup -c",
+    "build:dist": "rollup -c",
     "lint": "eslint src/**/*.js",
     "lint:fix": "eslint --fix src/**/*.js",
-    "test": "node prove-authentication.js"
+    "test": "echo 'Not implemented yet'",
+    "test-nightly": "echo 'Not implemented yet'"
   },
   "keywords": [
     "botium",
@@ -20,13 +22,24 @@
   "author": "Botium Team",
   "license": "MIT",
   "dependencies": {
+    "@babel/runtime": "^7.22.0",
     "debug": "^4.3.4"
   },
   "devDependencies": {
+    "@babel/core": "^7.22.0",
+    "@babel/plugin-transform-runtime": "^7.22.0",
+    "@babel/preset-env": "^7.22.0",
+    "rollup-plugin-babel": "^4.4.0",
+    "rollup-plugin-commonjs": "^10.1.0",
+    "rollup-plugin-json": "^4.0.0",
+    "chai": "^4.3.7",
+    "dotenv": "^16.3.1",
     "eslint": "^8.56.0",
     "eslint-config-standard": "^17.1.0",
     "eslint-plugin-import": "^2.29.1",
-    "eslint-plugin-promise": "^6.1.1"
+    "eslint-plugin-promise": "^6.1.1",
+    "mocha": "^10.2.0",
+    "rollup": "^2.38.5"
   },
   "engines": {
     "node": ">=18.0.0"
